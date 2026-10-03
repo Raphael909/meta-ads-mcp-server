@@ -34,6 +34,7 @@
 - [Transport Modes](#transport-modes)
 - [Cursor / Claude Desktop Setup](#cursor--claude-desktop-setup)
 - [Remote HTTP Server](#remote-http-server)
+- [MCP Resources (Zero-Shot Context)](#mcp-resources-zero-shot-context)
 - [Available Tools](#available-tools)
   - [Accounts](#accounts)
   - [Campaigns](#campaigns)
@@ -312,6 +313,19 @@ Set the following environment variables on your hosting provider (Railway, Rende
 | `META_ADS_ACCESS_TOKEN` | Your Meta access token |
 | `META_ADS_ENABLE_WRITE_TOOLS` | `true` to also expose mutating tools (off by default) |
 | `PORT` | Assigned automatically by the platform |
+
+---
+
+## MCP Resources (Zero-Shot Context)
+
+MCP Resources expose read-only state directly into the LLM context window without requiring iterative tool calls. This allows AI clients (Cursor, Claude Desktop, Claude.ai) to immediately discover accounts and inspect live campaign status:
+
+| URI / Template | Type | Description |
+|----------------|------|-------------|
+| `meta-ads://accounts` | Static | List of accessible ad accounts with currencies, balances, and total spend |
+| `meta-ads://account/{act_id}/overview` | Dynamic | Full account details, settings, and business profile |
+| `meta-ads://account/{act_id}/active-campaigns` | Dynamic | Real-time snapshot of active campaigns, budgets, and bid strategies |
+| `meta-ads://account/{act_id}/issues` | Dynamic | Delivery warnings, policy disapprovals, and pending reviews |
 
 ---
 

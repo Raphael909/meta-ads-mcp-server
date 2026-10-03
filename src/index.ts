@@ -44,6 +44,7 @@ import { registerTargetingTools } from "./tools/targeting.js";
 import { registerPageTools } from "./tools/pages.js";
 import { registerBudgetScheduleTools } from "./tools/budget-schedules.js";
 import { registerSavedAudienceTools } from "./tools/saved-audiences.js";
+import { registerResources } from "./resources.js";
 import { getAccessToken } from "./services/graph-api.js";
 import { isWriteToolsEnabled } from "./constants.js";
 
@@ -52,6 +53,7 @@ const server = new McpServer({
   version,
 });
 
+registerResources(server);
 registerAccountTools(server);
 registerInsightsTools(server);
 registerCampaignTools(server);
