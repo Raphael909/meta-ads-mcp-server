@@ -29,6 +29,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Test
+        run: npm test
+
       - name: Verify binary
         run: |
           echo "test" | timeout 3 node dist/index.js 2>&1 | grep -q "access-token" && echo "Binary OK"
