@@ -154,7 +154,8 @@ export interface SavedAudience {
   time_created?: string;
   time_updated?: string;
   run_status?: string;
-  account?: { id: string };
+  sentence_lines?: unknown[];
+  permission_for_actions?: unknown;
 }
 
 export interface PrepareParamsOptions {

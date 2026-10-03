@@ -5,7 +5,7 @@ import { fetchNode, fetchEdge, handleApiError } from "../services/graph-api.js";
 import { FieldsSchema, FilteringSchema, PaginationSchema } from "../schemas/common.js";
 
 const SAVED_AUDIENCE_FIELDS_DESC =
-  "Fields to retrieve. Available: id, name, description, targeting, approximate_count_lower_bound, approximate_count_upper_bound, time_created, time_updated, run_status, account";
+  "Fields to retrieve. Available: id, name, description, targeting, approximate_count_lower_bound, approximate_count_upper_bound, time_created, time_updated, run_status, sentence_lines (human-readable summary of targeting rules), permission_for_actions";
 
 export function registerSavedAudienceTools(server: McpServer): void {
   server.registerTool(
@@ -45,9 +45,10 @@ Examples:
     },
     async ({ act_id, fields, filtering, limit, after, before, offset }) => {
       try {
+        const normalizedActId = act_id.startsWith("act_") ? act_id : `act_${act_id}`;
         const effectiveFields =
           fields && fields.length > 0 ? fields : DEFAULT_SAVED_AUDIENCE_FIELDS;
-        const data = await fetchEdge(act_id, "saved_audiences", {
+        const data = await fetchEdge(normalizedActId, "saved_audiences", {
           fields: effectiveFields,
           filtering,
           limit,
