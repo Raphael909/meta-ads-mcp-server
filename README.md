@@ -12,7 +12,7 @@
 
 <p align="center">
   A <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server for the <strong>Meta (Facebook) Ads API</strong>, written in TypeScript.<br/>
-  <strong>54 tools</strong> — 35 read tools (always on) plus 19 opt-in write/lifecycle tools — covering ad accounts, campaigns, ad sets, ads, creatives, media, insights, targeting catalog, Facebook Pages, budget schedules, and activity logs via the <strong>Meta Graph API v22.0</strong>.
+  <strong>56 tools</strong> — 37 read tools (always on) plus 19 opt-in write/lifecycle tools — covering ad accounts, campaigns, ad sets, ads, creatives, media, insights, targeting catalog, saved audiences, Facebook Pages, budget schedules, and activity logs via the <strong>Meta Graph API v22.0</strong>.
 </p>
 
 <p align="center">
@@ -43,6 +43,7 @@
   - [Media](#media)
   - [Insights](#insights)
   - [Targeting Catalog](#targeting-catalog)
+  - [Saved Audiences](#saved-audiences)
   - [Pages](#pages)
   - [Budget Schedules](#budget-schedules)
   - [Activities](#activities)
@@ -67,6 +68,7 @@
 | **Media** | List ad images, upload images, lookup by hash, get ad previews and videos |
 | **Insights** | Performance analytics at account, campaign, ad set, and ad level |
 | **Targeting** | Search interests / behaviors / demographics / geo, audience size estimation |
+| **Saved Audiences** | List saved targeting presets, inspect audience targeting specs and reach |
 | **Pages** | List Facebook Pages reachable from the token, search by name |
 | **Budget Schedules** | Schedule temporary budget bumps over a time window |
 | **Activities** | Change history log for ad accounts and ad sets |
@@ -460,6 +462,13 @@ Time-range precedence: `time_ranges` > `time_range` > `since`/`until` > `date_pr
 | `meta_ads_search_demographics` | 🔍 | List demographic options (demographics / life_events / industries / income / family_statuses / user_device / user_os) |
 | `meta_ads_search_geo_locations` | 🔍 | Search countries / regions / cities / zips / geo_markets / electoral_districts |
 | `meta_ads_estimate_audience_size` | 🔍 | Estimate reach for a targeting spec via `/act_X/delivery_estimate` |
+
+### Saved Audiences
+
+| Tool | Type | Description |
+|------|------|-------------|
+| `meta_ads_get_saved_audiences_by_adaccount` | 🔍 | List saved audiences (targeting presets) in an ad account |
+| `meta_ads_get_saved_audience_by_id` | 🔍 | Retrieve detailed targeting specifications and metadata for a specific saved audience |
 
 ### Pages
 

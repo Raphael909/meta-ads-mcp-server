@@ -2,10 +2,10 @@
 /**
  * Meta Ads MCP Server
  *
- * MCP server for the Meta (Facebook) Ads API. Provides 35 read tools to
+ * MCP server for the Meta (Facebook) Ads API. Provides 37 read tools to
  * manage and analyze ad accounts, campaigns, ad sets, ads, creatives, media
  * assets, insights, activity logs, targeting catalog (interests/behaviors/
- * geo/demographics + audience-size estimation), Facebook Pages, plus a pure
+ * geo/demographics + audience-size estimation), saved audiences, Facebook Pages, plus a pure
  * image-crops utility — via the Meta Graph API v22.0.
  *
  * Opt-in: setting META_ADS_ENABLE_WRITE_TOOLS=true also registers 19
@@ -43,6 +43,7 @@ import { registerPaginationTools } from "./tools/pagination.js";
 import { registerTargetingTools } from "./tools/targeting.js";
 import { registerPageTools } from "./tools/pages.js";
 import { registerBudgetScheduleTools } from "./tools/budget-schedules.js";
+import { registerSavedAudienceTools } from "./tools/saved-audiences.js";
 import { getAccessToken } from "./services/graph-api.js";
 import { isWriteToolsEnabled } from "./constants.js";
 
@@ -63,6 +64,7 @@ registerPaginationTools(server);
 registerTargetingTools(server);
 registerPageTools(server);
 registerBudgetScheduleTools(server);
+registerSavedAudienceTools(server);
 
 if (isWriteToolsEnabled()) {
   console.error(

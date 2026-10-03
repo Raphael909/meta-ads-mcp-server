@@ -144,6 +144,19 @@ export interface ActivityRecord {
   translated_event_type?: string;
 }
 
+export interface SavedAudience {
+  id: string;
+  name?: string;
+  description?: string;
+  targeting?: unknown;
+  approximate_count_lower_bound?: number;
+  approximate_count_upper_bound?: number;
+  time_created?: string;
+  time_updated?: string;
+  run_status?: string;
+  account?: { id: string };
+}
+
 export interface PrepareParamsOptions {
   fields?: string[];
   filtering?: unknown[];

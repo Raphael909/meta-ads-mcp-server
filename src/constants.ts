@@ -33,6 +33,18 @@ export const DEFAULT_AD_ACCOUNT_FIELDS = [
   "id",
 ];
 
+export const DEFAULT_SAVED_AUDIENCE_FIELDS = [
+  "id",
+  "name",
+  "description",
+  "targeting",
+  "approximate_count_lower_bound",
+  "approximate_count_upper_bound",
+  "time_created",
+  "time_updated",
+  "run_status",
+];
+
 export const DATE_PRESETS = [
   "today",
   "yesterday",
