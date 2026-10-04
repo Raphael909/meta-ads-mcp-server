@@ -11,6 +11,44 @@ import {
 
 const AD_ACCOUNT_ID_PATTERN = /^act_\d+$/;
 
+let cachedAccountsPromise: Promise<Array<{ id: string; name?: string }>> | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL_MS = 10000;
+
+/**
+ * Fetch accessible ad accounts for template discovery.
+ * Uses a short TTL cache to avoid duplicate network calls when multiple template
+ * list callbacks are invoked together during `resources/list`.
+ */
+export async function fetchAccessibleAccounts(): Promise<Array<{ id: string; name?: string }>> {
+  const now = Date.now();
+  if (cachedAccountsPromise && now - cacheTimestamp < CACHE_TTL_MS) {
+    return cachedAccountsPromise;
+  }
+  cacheTimestamp = now;
+  cachedAccountsPromise = (async () => {
+    try {
+      const token = getAccessToken();
+      const data = (await makeGraphApiCall(`${FB_GRAPH_URL}/me`, {
+        access_token: token,
+        fields: "adaccounts{id,name}",
+      })) as { adaccounts?: { data?: Array<{ id: string; name?: string }> } };
+      return data?.adaccounts?.data ?? [];
+    } catch {
+      return [];
+    }
+  })();
+  return cachedAccountsPromise;
+}
+
+/**
+ * Reset the accounts discovery cache (primarily used in tests).
+ */
+export function resetAccountsCache(): void {
+  cachedAccountsPromise = null;
+  cacheTimestamp = 0;
+}
+
 /**
  * Validate the `act_id` URI template variable before it is interpolated into a Graph API path.
  * Rejects arrays and anything that is not `act_<digits>` to prevent path/endpoint injection.
@@ -109,10 +147,12 @@ const ISSUE_AD_FIELDS = [
  * - meta-ads://account/{act_id}/issues (delivery warnings, rejected ads, pending reviews across campaigns, ad sets, and ads)
  */
 export function registerResources(server: McpServer): void {
+  // 1. Static resource: List all accessible ad accounts
   server.registerResource(
     "ad_accounts",
     "meta-ads://accounts",
     {
+      title: "Meta Ad Accounts",
       mimeType: "application/json",
       description:
         "List of all Meta ad accounts accessible with the current access token, including account ID, name, status, currency, spend, and balance.",
@@ -126,10 +166,29 @@ export function registerResources(server: McpServer): void {
       )
   );
 
+  // 2. Dynamic resource template: Specific ad account overview
   server.registerResource(
     "account_overview",
-    new ResourceTemplate("meta-ads://account/{act_id}/overview", { list: undefined }),
+    new ResourceTemplate("meta-ads://account/{act_id}/overview", {
+      list: async () => {
+        const accounts = await fetchAccessibleAccounts();
+        return {
+          resources: accounts.map((acc) => ({
+            uri: `meta-ads://account/${acc.id}/overview`,
+            name: `account_overview_${acc.id}`,
+            title: acc.name
+              ? `Account Overview: ${acc.name} (${acc.id})`
+              : `Account Overview (${acc.id})`,
+            description: `Detailed profile and settings for ad account ${
+              acc.name ? `${acc.name} (${acc.id})` : acc.id
+            }.`,
+            mimeType: "application/json",
+          })),
+        };
+      },
+    }),
     {
+      title: "Meta Ad Account Overview",
       mimeType: "application/json",
       description:
         "Detailed profile and settings for a specific ad account (e.g. meta-ads://account/act_123456/overview).",
@@ -140,10 +199,29 @@ export function registerResources(server: McpServer): void {
       )
   );
 
+  // 3. Dynamic resource template: Active campaigns in an ad account
   server.registerResource(
     "active_campaigns",
-    new ResourceTemplate("meta-ads://account/{act_id}/active-campaigns", { list: undefined }),
+    new ResourceTemplate("meta-ads://account/{act_id}/active-campaigns", {
+      list: async () => {
+        const accounts = await fetchAccessibleAccounts();
+        return {
+          resources: accounts.map((acc) => ({
+            uri: `meta-ads://account/${acc.id}/active-campaigns`,
+            name: `active_campaigns_${acc.id}`,
+            title: acc.name
+              ? `Active Campaigns: ${acc.name} (${acc.id})`
+              : `Active Campaigns (${acc.id})`,
+            description: `Snapshot of active campaigns in ad account ${
+              acc.name ? `${acc.name} (${acc.id})` : acc.id
+            }.`,
+            mimeType: "application/json",
+          })),
+        };
+      },
+    }),
     {
+      title: "Meta Active Campaigns Snapshot",
       mimeType: "application/json",
       description:
         "Currently active campaigns in an ad account with objective, budgets, and bid strategy (e.g. meta-ads://account/act_123456/active-campaigns).",
@@ -158,10 +236,29 @@ export function registerResources(server: McpServer): void {
       )
   );
 
+  // 4. Dynamic resource template: Delivery issues, policy disapprovals, and warnings
   server.registerResource(
     "account_issues",
-    new ResourceTemplate("meta-ads://account/{act_id}/issues", { list: undefined }),
+    new ResourceTemplate("meta-ads://account/{act_id}/issues", {
+      list: async () => {
+        const accounts = await fetchAccessibleAccounts();
+        return {
+          resources: accounts.map((acc) => ({
+            uri: `meta-ads://account/${acc.id}/issues`,
+            name: `account_issues_${acc.id}`,
+            title: acc.name
+              ? `Issues & Warnings: ${acc.name} (${acc.id})`
+              : `Issues & Warnings (${acc.id})`,
+            description: `Campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account ${
+              acc.name ? `${acc.name} (${acc.id})` : acc.id
+            }.`,
+            mimeType: "application/json",
+          })),
+        };
+      },
+    }),
     {
+      title: "Meta Ad Account Issues & Warnings",
       mimeType: "application/json",
       description:
         "Campaigns, ad sets, and ads with delivery issues, policy disapprovals, or pending review in an account (e.g. meta-ads://account/act_123456/issues).",

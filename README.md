@@ -320,12 +320,14 @@ Set the following environment variables on your hosting provider (Railway, Rende
 
 MCP Resources expose read-only state directly into the LLM context window without requiring iterative tool calls. This allows AI clients (Cursor, Claude Desktop, Claude.ai) to immediately discover accounts and inspect live campaign status:
 
-| URI / Template | Type | Description |
-|----------------|------|-------------|
-| `meta-ads://accounts` | Static | List of accessible ad accounts with currencies, balances, and total spend |
-| `meta-ads://account/{act_id}/overview` | Dynamic | Full account details, settings, and business profile |
-| `meta-ads://account/{act_id}/active-campaigns` | Dynamic | Real-time snapshot of active campaigns, budgets, and bid strategies |
-| `meta-ads://account/{act_id}/issues` | Dynamic | Delivery warnings, policy disapprovals, and pending reviews across campaigns, ad sets, and ads |
+| URI / Template | Type | Title | Description |
+|----------------|------|-------|-------------|
+| `meta-ads://accounts` | Static | Meta Ad Accounts | List of accessible ad accounts with currencies, balances, and total spend |
+| `meta-ads://account/{act_id}/overview` | Dynamic | Meta Ad Account Overview | Full account details, settings, and business profile |
+| `meta-ads://account/{act_id}/active-campaigns` | Dynamic | Meta Active Campaigns Snapshot | Real-time snapshot of active campaigns, budgets, and bid strategies |
+| `meta-ads://account/{act_id}/issues` | Dynamic | Meta Ad Account Issues & Warnings | Delivery warnings, policy disapprovals, and pending reviews across campaigns, ad sets, and ads |
+
+Dynamic templates implement resource discovery callbacks (`list`), automatically querying accessible ad accounts from `/me?fields=adaccounts{id,name}` so clients calling `resources/list` can discover concrete URIs for every account.
 
 ---
 
@@ -587,6 +589,7 @@ meta-ads-mcp/
 ├── src/
 │   ├── index.ts                  # Entry point, server setup, transport selection, write-tools warning
 │   ├── constants.ts              # API version, base URLs, isWriteToolsEnabled() flag
+│   ├── resources.ts              # MCP Resources (accounts, overview, campaigns, issues)
 │   ├── types.ts                  # Shared TypeScript interfaces
 │   ├── services/
 │   │   └── graph-api.ts          # HTTP client (GET/POST/DELETE), auth, error handling, param builders
@@ -604,6 +607,7 @@ meta-ads-mcp/
 │       ├── activities.ts         # Activity log tools
 │       ├── pagination.ts         # Pagination utility tool
 │       ├── targeting.ts          # Interest/behavior/demographic/geo search + audience-size estimate
+│       ├── saved-audiences.ts    # Saved audience read tools
 │       ├── pages.ts              # Facebook Pages list and name search
 │       └── budget-schedules.ts   # Campaign budget schedule create
 ├── dist/                         # Compiled JavaScript output (generated)

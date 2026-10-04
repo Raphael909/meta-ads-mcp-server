@@ -1,10 +1,19 @@
-import { describe, it, expect, vi } from "vitest";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerResources } from "../src/resources.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  registerResources,
+  fetchAccessibleAccounts,
+  resetAccountsCache,
+} from "../src/resources.js";
 import * as graphApi from "../src/services/graph-api.js";
 
 describe("MCP Resources", () => {
-  it("registers static and template resources on McpServer", () => {
+  beforeEach(() => {
+    resetAccountsCache();
+    vi.restoreAllMocks();
+  });
+
+  it("registers static and template resources on McpServer with titles", () => {
     const server = new McpServer({ name: "test-server", version: "1.0.0" });
     const registerResourceSpy = vi.spyOn(server, "registerResource");
 
@@ -17,6 +26,14 @@ describe("MCP Resources", () => {
     expect(registeredNames).toContain("account_overview");
     expect(registeredNames).toContain("active_campaigns");
     expect(registeredNames).toContain("account_issues");
+
+    const configsByName = new Map(
+      registerResourceSpy.mock.calls.map((call) => [call[0], call[2] as any])
+    );
+    expect(configsByName.get("ad_accounts")?.title).toBe("Meta Ad Accounts");
+    expect(configsByName.get("account_overview")?.title).toBe("Meta Ad Account Overview");
+    expect(configsByName.get("active_campaigns")?.title).toBe("Meta Active Campaigns Snapshot");
+    expect(configsByName.get("account_issues")?.title).toBe("Meta Ad Account Issues & Warnings");
   });
 
   it("reads static ad_accounts resource (meta-ads://accounts)", async () => {
@@ -218,5 +235,150 @@ describe("MCP Resources", () => {
     const uri = new URL("meta-ads://account/act_999/overview");
 
     await expect(overviewHandler(uri, { act_id: "act_999" })).rejects.toThrow("Network failure");
+  });
+
+  describe("fetchAccessibleAccounts", () => {
+    it("fetches ad accounts from /me", async () => {
+      vi.spyOn(graphApi, "getAccessToken").mockReturnValue("mock_token");
+      const mockAccounts = [
+        { id: "act_101", name: "Client A" },
+        { id: "act_102", name: "Client B" },
+      ];
+      const makeCallSpy = vi.spyOn(graphApi, "makeGraphApiCall").mockResolvedValue({
+        adaccounts: { data: mockAccounts },
+      });
+
+      const accounts = await fetchAccessibleAccounts();
+
+      expect(accounts).toEqual(mockAccounts);
+      expect(makeCallSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("caches the result to avoid duplicate network calls within TTL", async () => {
+      vi.spyOn(graphApi, "getAccessToken").mockReturnValue("mock_token");
+      const mockAccounts = [{ id: "act_101", name: "Client A" }];
+      const makeCallSpy = vi.spyOn(graphApi, "makeGraphApiCall").mockResolvedValue({
+        adaccounts: { data: mockAccounts },
+      });
+
+      const firstCall = await fetchAccessibleAccounts();
+      const secondCall = await fetchAccessibleAccounts();
+
+      expect(firstCall).toEqual(mockAccounts);
+      expect(secondCall).toEqual(mockAccounts);
+      expect(makeCallSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears cache when resetAccountsCache is called", async () => {
+      vi.spyOn(graphApi, "getAccessToken").mockReturnValue("mock_token");
+      const mockAccounts = [{ id: "act_101", name: "Client A" }];
+      const makeCallSpy = vi.spyOn(graphApi, "makeGraphApiCall").mockResolvedValue({
+        adaccounts: { data: mockAccounts },
+      });
+
+      await fetchAccessibleAccounts();
+      expect(makeCallSpy).toHaveBeenCalledTimes(1);
+
+      resetAccountsCache();
+
+      await fetchAccessibleAccounts();
+      expect(makeCallSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns an empty array if the Graph API request fails", async () => {
+      vi.spyOn(graphApi, "getAccessToken").mockReturnValue("mock_token");
+      vi.spyOn(graphApi, "makeGraphApiCall").mockRejectedValue(new Error("Graph API error"));
+
+      const accounts = await fetchAccessibleAccounts();
+      expect(accounts).toEqual([]);
+    });
+  });
+
+  describe("template list callbacks", () => {
+    it("enumerates concrete URIs for account_overview, active_campaigns, and account_issues", async () => {
+      const server = new McpServer({ name: "test-server", version: "1.0.0" });
+      const templatesByName = new Map<string, ResourceTemplate>();
+
+      vi.spyOn(server, "registerResource").mockImplementation(
+        (name, uriOrTemplate) => {
+          if (uriOrTemplate instanceof ResourceTemplate) {
+            templatesByName.set(name as string, uriOrTemplate);
+          }
+          return {} as any;
+        }
+      );
+
+      registerResources(server);
+
+      vi.spyOn(graphApi, "getAccessToken").mockReturnValue("mock_token");
+      vi.spyOn(graphApi, "makeGraphApiCall").mockResolvedValue({
+        adaccounts: {
+          data: [
+            { id: "act_123", name: "Alpha Brand" },
+            { id: "act_456" },
+          ],
+        },
+      });
+
+      const overviewTemplate = templatesByName.get("account_overview")!;
+      expect(overviewTemplate.listCallback).toBeDefined();
+      const overviewList = await overviewTemplate.listCallback!({} as any);
+      expect(overviewList.resources).toEqual([
+        {
+          uri: "meta-ads://account/act_123/overview",
+          name: "account_overview_act_123",
+          title: "Account Overview: Alpha Brand (act_123)",
+          description: "Detailed profile and settings for ad account Alpha Brand (act_123).",
+          mimeType: "application/json",
+        },
+        {
+          uri: "meta-ads://account/act_456/overview",
+          name: "account_overview_act_456",
+          title: "Account Overview (act_456)",
+          description: "Detailed profile and settings for ad account act_456.",
+          mimeType: "application/json",
+        },
+      ]);
+
+      const campaignsTemplate = templatesByName.get("active_campaigns")!;
+      expect(campaignsTemplate.listCallback).toBeDefined();
+      const campaignsList = await campaignsTemplate.listCallback!({} as any);
+      expect(campaignsList.resources).toEqual([
+        {
+          uri: "meta-ads://account/act_123/active-campaigns",
+          name: "active_campaigns_act_123",
+          title: "Active Campaigns: Alpha Brand (act_123)",
+          description: "Snapshot of active campaigns in ad account Alpha Brand (act_123).",
+          mimeType: "application/json",
+        },
+        {
+          uri: "meta-ads://account/act_456/active-campaigns",
+          name: "active_campaigns_act_456",
+          title: "Active Campaigns (act_456)",
+          description: "Snapshot of active campaigns in ad account act_456.",
+          mimeType: "application/json",
+        },
+      ]);
+
+      const issuesTemplate = templatesByName.get("account_issues")!;
+      expect(issuesTemplate.listCallback).toBeDefined();
+      const issuesList = await issuesTemplate.listCallback!({} as any);
+      expect(issuesList.resources).toEqual([
+        {
+          uri: "meta-ads://account/act_123/issues",
+          name: "account_issues_act_123",
+          title: "Issues & Warnings: Alpha Brand (act_123)",
+          description: "Campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account Alpha Brand (act_123).",
+          mimeType: "application/json",
+        },
+        {
+          uri: "meta-ads://account/act_456/issues",
+          name: "account_issues_act_456",
+          title: "Issues & Warnings (act_456)",
+          description: "Campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account act_456.",
+          mimeType: "application/json",
+        },
+      ]);
+    });
   });
 });
