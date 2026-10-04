@@ -324,10 +324,10 @@ MCP Resources expose read-only state directly into the LLM context window withou
 |----------------|------|-------|-------------|
 | `meta-ads://accounts` | Static | Meta Ad Accounts | List of accessible ad accounts with currencies, balances, and total spend |
 | `meta-ads://account/{act_id}/overview` | Dynamic | Meta Ad Account Overview | Full account details, settings, and business profile |
-| `meta-ads://account/{act_id}/active-campaigns` | Dynamic | Meta Active Campaigns Snapshot | Real-time snapshot of active campaigns, budgets, and bid strategies |
-| `meta-ads://account/{act_id}/issues` | Dynamic | Meta Ad Account Issues & Warnings | Delivery warnings, policy disapprovals, and pending reviews across campaigns, ad sets, and ads |
+| `meta-ads://account/{act_id}/active-campaigns` | Dynamic | Meta Active Campaigns Snapshot | Snapshot of up to 50 active campaigns with budgets and bid strategy. Follow up with `meta_ads_fetch_pagination_url` when `paging.next` is present |
+| `meta-ads://account/{act_id}/issues` | Dynamic | Meta Ad Account Issues & Warnings | Snapshot of up to 50 items each across campaigns, ad sets, and ads with delivery warnings or policy disapprovals (`has_more: true` flags additional pages) |
 
-Dynamic templates implement resource discovery callbacks (`list`), automatically querying accessible ad accounts from `/me?fields=adaccounts{id,name}` so clients calling `resources/list` can discover concrete URIs for every account.
+Dynamic templates implement resource discovery callbacks (`list`), automatically querying accessible ad accounts from `/me?fields=adaccounts{id,name}` so clients calling `resources/list` can discover concrete URIs for every account. Since MCP resources cannot accept query parameters, responses capping out at 50 items provide pagination cursors/URLs (`paging.next`) that can be followed up using the `meta_ads_fetch_pagination_url` tool or the corresponding list tools.
 
 ---
 

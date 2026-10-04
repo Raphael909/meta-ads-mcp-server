@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { isWriteToolsEnabled } from "../src/constants.js";
+import { isWriteToolsEnabled, CHARACTER_LIMIT } from "../src/constants.js";
 
 describe("constants", () => {
+  it("defines CHARACTER_LIMIT as 25000", () => {
+    expect(CHARACTER_LIMIT).toBe(25000);
+  });
   const originalEnv = process.env.META_ADS_ENABLE_WRITE_TOOLS;
 
   afterEach(() => {

@@ -1,6 +1,6 @@
 import axios from "axios";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { FB_GRAPH_URL, DEFAULT_AD_ACCOUNT_FIELDS } from "./constants.js";
+import { FB_GRAPH_URL, DEFAULT_AD_ACCOUNT_FIELDS, CHARACTER_LIMIT } from "./constants.js";
 import {
   getAccessToken,
   makeGraphApiCall,
@@ -63,6 +63,59 @@ function parseAccountId(value: string | string[] | undefined): string {
 }
 
 /**
+ * Format data as JSON text, safely enforcing CHARACTER_LIMIT.
+ * If stringified data exceeds CHARACTER_LIMIT, performs structured array trimming
+ * while keeping the output valid JSON and flagging `_truncated: true`.
+ */
+export function formatResourceJson(data: unknown, limit = CHARACTER_LIMIT): string {
+  const fullText = JSON.stringify(data, null, 2);
+  if (fullText.length <= limit) {
+    return fullText;
+  }
+
+  if (typeof data === "object" && data !== null) {
+    if (Array.isArray(data)) {
+      const arr = [...data];
+      let count = arr.length;
+      while (count > 0 && JSON.stringify(arr, null, 2).length > limit) {
+        count = Math.floor(count / 2);
+        arr.length = count;
+      }
+      const structuredText = JSON.stringify(arr, null, 2);
+      if (structuredText.length <= limit) {
+        return structuredText;
+      }
+    } else {
+      const shallow: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+      shallow._truncated = true;
+      shallow._character_limit = limit;
+      shallow._warning = `Resource output exceeded ${limit} characters and was truncated. Use specific list tools with filters or pagination for full data.`;
+
+      for (const key of Object.keys(shallow)) {
+        if (Array.isArray(shallow[key])) {
+          const arr = shallow[key] as unknown[];
+          let count = arr.length;
+          while (count > 0 && JSON.stringify(shallow, null, 2).length > limit) {
+            count = Math.floor(count / 2);
+            shallow[key] = arr.slice(0, count);
+          }
+        }
+      }
+
+      const structuredText = JSON.stringify(shallow, null, 2);
+      if (structuredText.length <= limit) {
+        return structuredText;
+      }
+    }
+  }
+
+  return (
+    fullText.slice(0, Math.max(0, limit - 120)) +
+    `\n\n... [Truncated: exceeded ${limit} character limit. Use meta_ads_fetch_pagination_url or query tools.]`
+  );
+}
+
+/**
  * Run a resource loader and wrap its result in MCP resource contents.
  *
  * Unlike tools, resource reads have no in-band error channel: failures must be thrown so the
@@ -83,7 +136,7 @@ async function readJsonResource(uri: URL, load: () => Promise<unknown>) {
       {
         uri: uri.href,
         mimeType: "application/json",
-        text: JSON.stringify(data, null, 2),
+        text: formatResourceJson(data),
       },
     ],
   };
@@ -212,9 +265,9 @@ export function registerResources(server: McpServer): void {
             title: acc.name
               ? `Active Campaigns: ${acc.name} (${acc.id})`
               : `Active Campaigns (${acc.id})`,
-            description: `Snapshot of active campaigns in ad account ${
+            description: `Snapshot of up to 50 active campaigns in ad account ${
               acc.name ? `${acc.name} (${acc.id})` : acc.id
-            }.`,
+            }. If paging.next is present, use meta_ads_fetch_pagination_url to fetch additional pages.`,
             mimeType: "application/json",
           })),
         };
@@ -224,7 +277,7 @@ export function registerResources(server: McpServer): void {
       title: "Meta Active Campaigns Snapshot",
       mimeType: "application/json",
       description:
-        "Currently active campaigns in an ad account with objective, budgets, and bid strategy (e.g. meta-ads://account/act_123456/active-campaigns).",
+        "Snapshot of up to 50 active campaigns in an ad account with objective, budgets, and bid strategy (e.g. meta-ads://account/act_123456/active-campaigns). Resources do not support query parameters; if paging.next is present, use meta_ads_fetch_pagination_url or meta_ads_get_campaigns_by_adaccount to fetch additional pages.",
     },
     (uri, { act_id }) =>
       readJsonResource(uri, () =>
@@ -249,9 +302,9 @@ export function registerResources(server: McpServer): void {
             title: acc.name
               ? `Issues & Warnings: ${acc.name} (${acc.id})`
               : `Issues & Warnings (${acc.id})`,
-            description: `Campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account ${
+            description: `Snapshot of up to 50 items each across campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account ${
               acc.name ? `${acc.name} (${acc.id})` : acc.id
-            }.`,
+            }. If has_more is true, use meta_ads_fetch_pagination_url or specific query tools to fetch additional pages.`,
             mimeType: "application/json",
           })),
         };
@@ -261,7 +314,7 @@ export function registerResources(server: McpServer): void {
       title: "Meta Ad Account Issues & Warnings",
       mimeType: "application/json",
       description:
-        "Campaigns, ad sets, and ads with delivery issues, policy disapprovals, or pending review in an account (e.g. meta-ads://account/act_123456/issues).",
+        "Snapshot of up to 50 items each across campaigns, ad sets, and ads with delivery issues, policy disapprovals, or pending review (e.g. meta-ads://account/act_123456/issues). Resources do not support query parameters; if has_more is true or paging contains next URLs, use meta_ads_fetch_pagination_url or the respective list tools to fetch additional pages.",
     },
     (uri, { act_id }) =>
       readJsonResource(uri, async () => {
@@ -283,10 +336,23 @@ export function registerResources(server: McpServer): void {
             limit: 50,
           }),
         ]);
+        const campaignsPaging = (campaignsResult as { paging?: unknown })?.paging;
+        const adsetsPaging = (adsetsResult as { paging?: unknown })?.paging;
+        const adsPaging = (adsResult as { paging?: unknown })?.paging;
         return {
           campaigns: (campaignsResult as { data?: unknown[] })?.data ?? [],
           adsets: (adsetsResult as { data?: unknown[] })?.data ?? [],
           ads: (adsResult as { data?: unknown[] })?.data ?? [],
+          paging: {
+            campaigns: campaignsPaging,
+            adsets: adsetsPaging,
+            ads: adsPaging,
+          },
+          has_more: Boolean(
+            (campaignsPaging as any)?.next ||
+              (adsetsPaging as any)?.next ||
+              (adsPaging as any)?.next
+          ),
         };
       })
   );

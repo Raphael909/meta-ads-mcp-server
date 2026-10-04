@@ -4,7 +4,9 @@ import {
   registerResources,
   fetchAccessibleAccounts,
   resetAccountsCache,
+  formatResourceJson,
 } from "../src/resources.js";
+import { CHARACTER_LIMIT } from "../src/constants.js";
 import * as graphApi from "../src/services/graph-api.js";
 
 describe("MCP Resources", () => {
@@ -185,7 +187,55 @@ describe("MCP Resources", () => {
       campaigns: mockCampaigns.data,
       adsets: mockAdsets.data,
       ads: mockAds.data,
+      paging: {
+        campaigns: undefined,
+        adsets: undefined,
+        ads: undefined,
+      },
+      has_more: false,
     });
+  });
+
+  it("signals has_more: true and includes paging URLs when pagination exists in account_issues", async () => {
+    const server = new McpServer({ name: "test-server", version: "1.0.0" });
+    let issuesHandler: any;
+
+    vi.spyOn(server, "registerResource").mockImplementation(
+      (name, _uriOrTemplate, _config, handler) => {
+        if (name === "account_issues") {
+          issuesHandler = handler;
+        }
+        return {} as any;
+      }
+    );
+
+    registerResources(server);
+
+    const mockCampaigns = { data: [] };
+    const mockAdsets = { data: [] };
+    const mockAds = {
+      data: [{ id: "ad_1", name: "Disapproved Ad", effective_status: "DISAPPROVED" }],
+      paging: {
+        cursors: { before: "cur_1", after: "cur_2" },
+        next: "https://graph.facebook.com/v22.0/act_123/ads?after=cur_2",
+      },
+    };
+
+    vi.spyOn(graphApi, "fetchEdge").mockImplementation((_id, edge) => {
+      if (edge === "campaigns") return Promise.resolve(mockCampaigns);
+      if (edge === "adsets") return Promise.resolve(mockAdsets);
+      if (edge === "ads") return Promise.resolve(mockAds);
+      return Promise.resolve({ data: [] });
+    });
+
+    const uri = new URL("meta-ads://account/act_123/issues");
+    const result = await issuesHandler(uri, { act_id: "act_123" });
+    const parsed = JSON.parse(result.contents[0].text);
+
+    expect(parsed.has_more).toBe(true);
+    expect(parsed.paging.ads.next).toBe(
+      "https://graph.facebook.com/v22.0/act_123/ads?after=cur_2"
+    );
   });
 
   it.each(["me", "123", "act_12/adaccounts", "act_1?x=y", ["act_1", "act_2"]])(
@@ -348,14 +398,16 @@ describe("MCP Resources", () => {
           uri: "meta-ads://account/act_123/active-campaigns",
           name: "active_campaigns_act_123",
           title: "Active Campaigns: Alpha Brand (act_123)",
-          description: "Snapshot of active campaigns in ad account Alpha Brand (act_123).",
+          description:
+            "Snapshot of up to 50 active campaigns in ad account Alpha Brand (act_123). If paging.next is present, use meta_ads_fetch_pagination_url to fetch additional pages.",
           mimeType: "application/json",
         },
         {
           uri: "meta-ads://account/act_456/active-campaigns",
           name: "active_campaigns_act_456",
           title: "Active Campaigns (act_456)",
-          description: "Snapshot of active campaigns in ad account act_456.",
+          description:
+            "Snapshot of up to 50 active campaigns in ad account act_456. If paging.next is present, use meta_ads_fetch_pagination_url to fetch additional pages.",
           mimeType: "application/json",
         },
       ]);
@@ -368,17 +420,54 @@ describe("MCP Resources", () => {
           uri: "meta-ads://account/act_123/issues",
           name: "account_issues_act_123",
           title: "Issues & Warnings: Alpha Brand (act_123)",
-          description: "Campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account Alpha Brand (act_123).",
+          description:
+            "Snapshot of up to 50 items each across campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account Alpha Brand (act_123). If has_more is true, use meta_ads_fetch_pagination_url or specific query tools to fetch additional pages.",
           mimeType: "application/json",
         },
         {
           uri: "meta-ads://account/act_456/issues",
           name: "account_issues_act_456",
           title: "Issues & Warnings (act_456)",
-          description: "Campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account act_456.",
+          description:
+            "Snapshot of up to 50 items each across campaigns, ad sets, and ads with delivery issues or policy disapprovals in ad account act_456. If has_more is true, use meta_ads_fetch_pagination_url or specific query tools to fetch additional pages.",
           mimeType: "application/json",
         },
       ]);
+    });
+  });
+
+  describe("formatResourceJson", () => {
+    it("returns unmodified JSON when string length is within limit", () => {
+      const data = { id: "act_1", name: "Test Account" };
+      const output = formatResourceJson(data, 1000);
+      expect(output).toBe(JSON.stringify(data, null, 2));
+      expect(JSON.parse(output)).toEqual(data);
+    });
+
+    it("performs structured array truncation and marks _truncated: true when exceeding limit", () => {
+      const items = Array.from({ length: 50 }, (_, i) => ({
+        id: `item_${i}`,
+        description: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+      }));
+      const data = { data: items };
+
+      // Set a low limit to trigger truncation
+      const limit = 500;
+      const output = formatResourceJson(data, limit);
+
+      expect(output.length).toBeLessThanOrEqual(limit);
+      const parsed = JSON.parse(output);
+      expect(parsed._truncated).toBe(true);
+      expect(parsed._character_limit).toBe(limit);
+      expect(parsed._warning).toBeDefined();
+      expect(parsed.data.length).toBeLessThan(items.length);
+    });
+
+    it("uses CHARACTER_LIMIT from constants by default", () => {
+      const data = { id: "act_1" };
+      const output = formatResourceJson(data);
+      expect(output.length).toBeLessThan(CHARACTER_LIMIT);
+      expect(JSON.parse(output)).toEqual(data);
     });
   });
 });
