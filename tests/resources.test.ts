@@ -127,14 +127,36 @@ describe("MCP Resources", () => {
     registerResources(server);
     expect(issuesHandler).toBeDefined();
 
-    const mockIssues = {
+    const mockCampaigns = {
+      data: [{ id: "camp_1", name: "Budget Issue Campaign", effective_status: "WITH_ISSUES" }],
+    };
+    const mockAdsets = {
+      data: [{ id: "adset_1", name: "Learning Limited Ad Set", effective_status: "WITH_ISSUES" }],
+    };
+    const mockAds = {
       data: [{ id: "ad_1", name: "Rejected Ad", effective_status: "DISAPPROVED" }],
     };
-    const fetchEdgeSpy = vi.spyOn(graphApi, "fetchEdge").mockResolvedValue(mockIssues);
+
+    const fetchEdgeSpy = vi.spyOn(graphApi, "fetchEdge").mockImplementation((_id, edge) => {
+      if (edge === "campaigns") return Promise.resolve(mockCampaigns);
+      if (edge === "adsets") return Promise.resolve(mockAdsets);
+      if (edge === "ads") return Promise.resolve(mockAds);
+      return Promise.resolve({ data: [] });
+    });
 
     const uri = new URL("meta-ads://account/act_123/issues");
     const result = await issuesHandler(uri, { act_id: "act_123" });
 
+    expect(fetchEdgeSpy).toHaveBeenCalledWith(
+      "act_123",
+      "campaigns",
+      expect.objectContaining({ effective_status: ["WITH_ISSUES"] })
+    );
+    expect(fetchEdgeSpy).toHaveBeenCalledWith(
+      "act_123",
+      "adsets",
+      expect.objectContaining({ effective_status: ["WITH_ISSUES", "PENDING_REVIEW"] })
+    );
     expect(fetchEdgeSpy).toHaveBeenCalledWith(
       "act_123",
       "ads",
@@ -142,10 +164,42 @@ describe("MCP Resources", () => {
         effective_status: ["DISAPPROVED", "WITH_ISSUES", "PENDING_REVIEW"],
       })
     );
-    expect(JSON.parse(result.contents[0].text)).toEqual(mockIssues);
+    expect(JSON.parse(result.contents[0].text)).toEqual({
+      campaigns: mockCampaigns.data,
+      adsets: mockAdsets.data,
+      ads: mockAds.data,
+    });
   });
 
-  it("gracefully formats API errors as text contents", async () => {
+  it.each(["me", "123", "act_12/adaccounts", "act_1?x=y", ["act_1", "act_2"]])(
+    "rejects invalid act_id %j without calling the Graph API",
+    async (badId) => {
+      const server = new McpServer({ name: "test-server", version: "1.0.0" });
+      const handlers: Record<string, any> = {};
+
+      vi.spyOn(server, "registerResource").mockImplementation(
+        (name, _uriOrTemplate, _config, handler) => {
+          handlers[name] = handler;
+          return {} as any;
+        }
+      );
+
+      registerResources(server);
+      const fetchNodeSpy = vi.spyOn(graphApi, "fetchNode").mockClear();
+      const fetchEdgeSpy = vi.spyOn(graphApi, "fetchEdge").mockClear();
+
+      for (const name of ["account_overview", "active_campaigns", "account_issues"]) {
+        await expect(
+          handlers[name](new URL("meta-ads://account/x/overview"), { act_id: badId })
+        ).rejects.toThrow("Invalid ad account ID");
+      }
+
+      expect(fetchNodeSpy).not.toHaveBeenCalled();
+      expect(fetchEdgeSpy).not.toHaveBeenCalled();
+    }
+  );
+
+  it("throws API errors so the SDK returns a protocol error", async () => {
     const server = new McpServer({ name: "test-server", version: "1.0.0" });
     let overviewHandler: any;
 
@@ -162,9 +216,7 @@ describe("MCP Resources", () => {
     vi.spyOn(graphApi, "fetchNode").mockRejectedValue(new Error("Network failure"));
 
     const uri = new URL("meta-ads://account/act_999/overview");
-    const result = await overviewHandler(uri, { act_id: "act_999" });
 
-    expect(result.contents[0].mimeType).toBe("text/plain");
-    expect(result.contents[0].text).toContain("Network failure");
+    await expect(overviewHandler(uri, { act_id: "act_999" })).rejects.toThrow("Network failure");
   });
 });

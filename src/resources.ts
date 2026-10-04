@@ -1,3 +1,4 @@
+import axios from "axios";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { FB_GRAPH_URL, DEFAULT_AD_ACCOUNT_FIELDS } from "./constants.js";
 import {
@@ -8,6 +9,95 @@ import {
   handleApiError,
 } from "./services/graph-api.js";
 
+const AD_ACCOUNT_ID_PATTERN = /^act_\d+$/;
+
+/**
+ * Validate the `act_id` URI template variable before it is interpolated into a Graph API path.
+ * Rejects arrays and anything that is not `act_<digits>` to prevent path/endpoint injection.
+ */
+function parseAccountId(value: string | string[] | undefined): string {
+  if (typeof value !== "string" || !AD_ACCOUNT_ID_PATTERN.test(value)) {
+    throw new Error(
+      "Invalid ad account ID — expected the form 'act_' followed by digits, e.g. 'act_1234567890'."
+    );
+  }
+  return value;
+}
+
+/**
+ * Run a resource loader and wrap its result in MCP resource contents.
+ *
+ * Unlike tools, resource reads have no in-band error channel: failures must be thrown so the
+ * SDK returns a JSON-RPC error instead of error text masquerading as successful content.
+ */
+async function readJsonResource(uri: URL, load: () => Promise<unknown>) {
+  let data: unknown;
+  try {
+    data = await load();
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      throw new Error(handleApiError(error));
+    }
+    throw error;
+  }
+  return {
+    contents: [
+      {
+        uri: uri.href,
+        mimeType: "application/json",
+        text: JSON.stringify(data, null, 2),
+      },
+    ],
+  };
+}
+
+const ACTIVE_CAMPAIGN_FIELDS = [
+  "id",
+  "name",
+  "objective",
+  "status",
+  "effective_status",
+  "daily_budget",
+  "lifetime_budget",
+  "budget_remaining",
+  "bid_strategy",
+  "start_time",
+  "stop_time",
+];
+
+const ISSUE_CAMPAIGN_FIELDS = [
+  "id",
+  "name",
+  "status",
+  "effective_status",
+  "issues_info",
+  "created_time",
+  "updated_time",
+];
+
+const ISSUE_ADSET_FIELDS = [
+  "id",
+  "name",
+  "status",
+  "effective_status",
+  "issues_info",
+  "campaign_id",
+  "created_time",
+  "updated_time",
+];
+
+const ISSUE_AD_FIELDS = [
+  "id",
+  "name",
+  "status",
+  "effective_status",
+  "issues_info",
+  "adset_id",
+  "campaign_id",
+  "created_time",
+  "updated_time",
+];
+
 /**
  * Register MCP Resources providing zero-shot context to AI models.
  *
@@ -16,10 +106,9 @@ import {
  * - meta-ads://accounts (list of accessible accounts with currency & spend)
  * - meta-ads://account/{act_id}/overview (account details and status)
  * - meta-ads://account/{act_id}/active-campaigns (currently running campaigns & budgets)
- * - meta-ads://account/{act_id}/issues (delivery warnings, rejected ads, pending reviews)
+ * - meta-ads://account/{act_id}/issues (delivery warnings, rejected ads, pending reviews across campaigns, ad sets, and ads)
  */
 export function registerResources(server: McpServer): void {
-  // 1. Static resource: List all accessible ad accounts
   server.registerResource(
     "ad_accounts",
     "meta-ads://accounts",
@@ -28,38 +117,15 @@ export function registerResources(server: McpServer): void {
       description:
         "List of all Meta ad accounts accessible with the current access token, including account ID, name, status, currency, spend, and balance.",
     },
-    async (uri) => {
-      try {
-        const token = getAccessToken();
-        const url = `${FB_GRAPH_URL}/me`;
-        const data = await makeGraphApiCall(url, {
-          access_token: token,
+    (uri) =>
+      readJsonResource(uri, () =>
+        makeGraphApiCall(`${FB_GRAPH_URL}/me`, {
+          access_token: getAccessToken(),
           fields: "adaccounts{id,name,account_id,account_status,currency,amount_spent,balance}",
-        });
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "application/json",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "text/plain",
-              text: handleApiError(error),
-            },
-          ],
-        };
-      }
-    }
+        })
+      )
   );
 
-  // 2. Dynamic resource template: Specific ad account overview
   server.registerResource(
     "account_overview",
     new ResourceTemplate("meta-ads://account/{act_id}/overview", { list: undefined }),
@@ -68,34 +134,12 @@ export function registerResources(server: McpServer): void {
       description:
         "Detailed profile and settings for a specific ad account (e.g. meta-ads://account/act_123456/overview).",
     },
-    async (uri, { act_id }) => {
-      try {
-        const accountId = String(act_id);
-        const data = await fetchNode(accountId, { fields: DEFAULT_AD_ACCOUNT_FIELDS });
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "application/json",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "text/plain",
-              text: handleApiError(error),
-            },
-          ],
-        };
-      }
-    }
+    (uri, { act_id }) =>
+      readJsonResource(uri, () =>
+        fetchNode(parseAccountId(act_id), { fields: DEFAULT_AD_ACCOUNT_FIELDS })
+      )
   );
 
-  // 3. Dynamic resource template: Active campaigns in an ad account
   server.registerResource(
     "active_campaigns",
     new ResourceTemplate("meta-ads://account/{act_id}/active-campaigns", { list: undefined }),
@@ -104,96 +148,49 @@ export function registerResources(server: McpServer): void {
       description:
         "Currently active campaigns in an ad account with objective, budgets, and bid strategy (e.g. meta-ads://account/act_123456/active-campaigns).",
     },
-    async (uri, { act_id }) => {
-      try {
-        const accountId = String(act_id);
-        const data = await fetchEdge(accountId, "campaigns", {
+    (uri, { act_id }) =>
+      readJsonResource(uri, () =>
+        fetchEdge(parseAccountId(act_id), "campaigns", {
           effective_status: ["ACTIVE"],
-          fields: [
-            "id",
-            "name",
-            "objective",
-            "status",
-            "effective_status",
-            "daily_budget",
-            "lifetime_budget",
-            "budget_remaining",
-            "bid_strategy",
-            "start_time",
-            "stop_time",
-          ],
+          fields: ACTIVE_CAMPAIGN_FIELDS,
           limit: 50,
-        });
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "application/json",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "text/plain",
-              text: handleApiError(error),
-            },
-          ],
-        };
-      }
-    }
+        })
+      )
   );
 
-  // 4. Dynamic resource template: Delivery issues, disapprovals, and warnings
   server.registerResource(
     "account_issues",
     new ResourceTemplate("meta-ads://account/{act_id}/issues", { list: undefined }),
     {
       mimeType: "application/json",
       description:
-        "Ads and ad sets with delivery issues, policy disapprovals, or pending review in an account (e.g. meta-ads://account/act_123456/issues).",
+        "Campaigns, ad sets, and ads with delivery issues, policy disapprovals, or pending review in an account (e.g. meta-ads://account/act_123456/issues).",
     },
-    async (uri, { act_id }) => {
-      try {
-        const accountId = String(act_id);
-        const data = await fetchEdge(accountId, "ads", {
-          effective_status: ["DISAPPROVED", "WITH_ISSUES", "PENDING_REVIEW"],
-          fields: [
-            "id",
-            "name",
-            "status",
-            "effective_status",
-            "issues_info",
-            "adset_id",
-            "campaign_id",
-            "created_time",
-            "updated_time",
-          ],
-          limit: 50,
-        });
+    (uri, { act_id }) =>
+      readJsonResource(uri, async () => {
+        const accountId = parseAccountId(act_id);
+        const [campaignsResult, adsetsResult, adsResult] = await Promise.all([
+          fetchEdge(accountId, "campaigns", {
+            effective_status: ["WITH_ISSUES"],
+            fields: ISSUE_CAMPAIGN_FIELDS,
+            limit: 50,
+          }),
+          fetchEdge(accountId, "adsets", {
+            effective_status: ["WITH_ISSUES", "PENDING_REVIEW"],
+            fields: ISSUE_ADSET_FIELDS,
+            limit: 50,
+          }),
+          fetchEdge(accountId, "ads", {
+            effective_status: ["DISAPPROVED", "WITH_ISSUES", "PENDING_REVIEW"],
+            fields: ISSUE_AD_FIELDS,
+            limit: 50,
+          }),
+        ]);
         return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "application/json",
-              text: JSON.stringify(data, null, 2),
-            },
-          ],
+          campaigns: (campaignsResult as { data?: unknown[] })?.data ?? [],
+          adsets: (adsetsResult as { data?: unknown[] })?.data ?? [],
+          ads: (adsResult as { data?: unknown[] })?.data ?? [],
         };
-      } catch (error) {
-        return {
-          contents: [
-            {
-              uri: uri.href,
-              mimeType: "text/plain",
-              text: handleApiError(error),
-            },
-          ],
-        };
-      }
-    }
+      })
   );
 }

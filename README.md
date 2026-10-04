@@ -325,7 +325,7 @@ MCP Resources expose read-only state directly into the LLM context window withou
 | `meta-ads://accounts` | Static | List of accessible ad accounts with currencies, balances, and total spend |
 | `meta-ads://account/{act_id}/overview` | Dynamic | Full account details, settings, and business profile |
 | `meta-ads://account/{act_id}/active-campaigns` | Dynamic | Real-time snapshot of active campaigns, budgets, and bid strategies |
-| `meta-ads://account/{act_id}/issues` | Dynamic | Delivery warnings, policy disapprovals, and pending reviews |
+| `meta-ads://account/{act_id}/issues` | Dynamic | Delivery warnings, policy disapprovals, and pending reviews across campaigns, ad sets, and ads |
 
 ---
 
