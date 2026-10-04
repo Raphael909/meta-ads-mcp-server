@@ -26,19 +26,25 @@ export async function fetchAccessibleAccounts(): Promise<Array<{ id: string; nam
     return cachedAccountsPromise;
   }
   cacheTimestamp = now;
-  cachedAccountsPromise = (async () => {
-    try {
-      const token = getAccessToken();
-      const data = (await makeGraphApiCall(`${FB_GRAPH_URL}/me`, {
-        access_token: token,
-        fields: "adaccounts{id,name}",
-      })) as { adaccounts?: { data?: Array<{ id: string; name?: string }> } };
-      return data?.adaccounts?.data ?? [];
-    } catch {
-      return [];
+  const load = async () => {
+    const token = getAccessToken();
+    const data = (await makeGraphApiCall(`${FB_GRAPH_URL}/me`, {
+      access_token: token,
+      fields: "adaccounts.limit(100){id,name}",
+    })) as { adaccounts?: { data?: Array<{ id: string; name?: string }> } };
+    return data?.adaccounts?.data ?? [];
+  };
+  const pending: Promise<Array<{ id: string; name?: string }>> = load().catch((error) => {
+    // Don't cache failures, otherwise an expired token looks like "no accounts" for the TTL.
+    if (cachedAccountsPromise === pending) {
+      cachedAccountsPromise = null;
+      cacheTimestamp = 0;
     }
-  })();
-  return cachedAccountsPromise;
+    console.error(`Failed to list ad accounts for resource discovery: ${handleApiError(error)}`);
+    return [];
+  });
+  cachedAccountsPromise = pending;
+  return pending;
 }
 
 /**
@@ -109,10 +115,25 @@ export function formatResourceJson(data: unknown, limit = CHARACTER_LIMIT): stri
     }
   }
 
-  return (
-    fullText.slice(0, Math.max(0, limit - 120)) +
-    `\n\n... [Truncated: exceeded ${limit} character limit. Use meta_ads_fetch_pagination_url or query tools.]`
-  );
+  // Escaping inflates the excerpt, so shrink it until the wrapper itself fits (and stays valid JSON).
+  const build = (excerptLength: number) =>
+    JSON.stringify(
+      {
+        _truncated: true,
+        _character_limit: limit,
+        _warning: `Resource output exceeded ${limit} characters and could not be trimmed structurally. Use the list tools with filters or pagination for full data.`,
+        _partial_text: fullText.slice(0, excerptLength),
+      },
+      null,
+      2
+    );
+  let excerptLength = Math.max(0, limit - 400);
+  let wrapped = build(excerptLength);
+  while (wrapped.length > limit && excerptLength > 0) {
+    excerptLength = Math.floor(excerptLength * 0.8);
+    wrapped = build(excerptLength);
+  }
+  return wrapped;
 }
 
 /**

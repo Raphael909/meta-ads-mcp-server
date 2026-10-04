@@ -342,6 +342,43 @@ describe("MCP Resources", () => {
       const accounts = await fetchAccessibleAccounts();
       expect(accounts).toEqual([]);
     });
+
+    it("does not cache failures, so the next call retries", async () => {
+      vi.spyOn(graphApi, "getAccessToken").mockReturnValue("mock_token");
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const makeCallSpy = vi
+        .spyOn(graphApi, "makeGraphApiCall")
+        .mockRejectedValueOnce(new Error("token expired"))
+        .mockResolvedValueOnce({ adaccounts: { data: [{ id: "act_1" }] } });
+
+      expect(await fetchAccessibleAccounts()).toEqual([]);
+      expect(await fetchAccessibleAccounts()).toEqual([{ id: "act_1" }]);
+      expect(makeCallSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("requests up to 100 accounts instead of Graph's default page of 25", async () => {
+      vi.spyOn(graphApi, "getAccessToken").mockReturnValue("mock_token");
+      const makeCallSpy = vi
+        .spyOn(graphApi, "makeGraphApiCall")
+        .mockResolvedValue({ adaccounts: { data: [] } });
+
+      await fetchAccessibleAccounts();
+
+      expect(makeCallSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ fields: "adaccounts.limit(100){id,name}" })
+      );
+    });
+  });
+
+  describe("formatResourceJson fallback", () => {
+    it("always returns valid JSON within the limit when structural trimming is impossible", () => {
+      const limit = 1000;
+      const text = formatResourceJson({ blob: 'x"\n'.repeat(5000) }, limit);
+
+      expect(text.length).toBeLessThanOrEqual(limit);
+      expect(JSON.parse(text)._truncated).toBe(true);
+    });
   });
 
   describe("template list callbacks", () => {
